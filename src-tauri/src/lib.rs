@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use tauri::Manager;
 use tauri_plugin_updater::UpdaterExt;
 
-const UPDATER_PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlGRUYwMTFFRTI0QTcyNjIKUldSaWNrcmlIZ0h2bnoxWTJqd2hmZUliOHhEb2o0OUdQak8zS1NXVUJqVXdBYlB4TG9PNmt2bzAK";
+const UPDATER_PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2NzRFMzM5REE2NTlENzcKUldSM25XWGFPZU4wVnUwZTYyUXNDelZ2KzRaZWF6dWVVa1FnQmI4NGFVeVFJK0tBa0dHZVFLVVQK";
 
 #[cfg(target_os = "macos")]
 mod macos_input;
