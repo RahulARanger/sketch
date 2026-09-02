@@ -7,3 +7,5 @@ src-tauri/target
 .env.*
 !.env.example
 .tauri/*.key
+.tauri/*.key.pub
+backup-secret.json
