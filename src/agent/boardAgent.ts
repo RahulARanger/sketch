@@ -4,7 +4,9 @@ import { WORLD_ORIGIN } from "../canvasNavigation.ts";
 import type { ImageBlock, NotePage, Point, SketchDocument, Stroke } from "../types.ts";
 import { nativeOllamaTransport, downloadRemoteImage, searchWikimediaImages } from "./ollama.ts";
 import { renderPageSnapshot } from "./pageSnapshot.ts";
+import { buildBoardContext } from "./boardContext.ts";
 import type { AgentDependencies, AgentMessage, AgentPendingAction, AgentRunResult, AgentSettings, OllamaMessage, OllamaToolCall, OllamaToolDefinition } from "./types.ts";
+import type { AgentContextRef } from "./types.ts";
 
 const schemas = {
   read_active_page: z.object({}),
@@ -65,15 +67,25 @@ export class BoardAgent {
     this.deps = { transport: deps.transport ?? nativeOllamaTransport, snapshot: deps.snapshot ?? renderPageSnapshot, searchImages: deps.searchImages ?? searchWikimediaImages, downloadImage: deps.downloadImage ?? downloadRemoteImage };
   }
 
-  async run(prompt: string, document: SketchDocument, sectionId: string, pageId: string, settings: AgentSettings, onProgress?: (messages: AgentMessage[]) => void): Promise<AgentRunResult> {
+  async run(prompt: string, document: SketchDocument, sectionId: string, pageId: string, settings: AgentSettings, onProgress?: (messages: AgentMessage[]) => void, contextRefs: AgentContextRef[] = [], includeEntireBoard = false, conversation: AgentMessage[] = []): Promise<AgentRunResult> {
     this.state?.controller.abort();
     const current = clone(document);
     const { page } = pageFor(current, sectionId, pageId);
     if (!page) return { status: "failed", answer: "The active page could not be found.", document: current, messages: [], error: "Active page not found" };
-    const context = { documentTitle: current.title, activeSection: current.sections.find((section) => section.id === sectionId)?.title, activePage: { id: page.id, title: page.title, textBlocks: page.textBlocks, imageBlocks: (page.imageBlocks ?? []).map(({ src: _src, ...metadata }) => metadata), drawing: drawingSummary(page) } };
+    const context = buildBoardContext(current, sectionId, pageId, contextRefs, includeEntireBoard);
     const firstMessage: OllamaMessage = { role: "user", content: `${prompt}\n\nBoard context:\n${toolResult(context)}` };
-    if (settings.includePageImage && settings.visionModel) firstMessage.images = [this.deps.snapshot(page)];
-    this.state = { document: current, originalFingerprint: JSON.stringify(document), messages: [{ role: "system", content: "You are the BoSketchObs board agent. Use board tools to answer questions and make precise, bounded edits. Never invent IDs. Coordinates are page coordinates; strokes use the app's vector format. Explain what you changed after completing the task." }, firstMessage], uiMessages: [{ role: "user", content: prompt }], settings, sectionId, pageId, steps: 0, controller: new AbortController(), onProgress };
+    const priorMessages: OllamaMessage[] = conversation.slice(-30).flatMap((message) => {
+      if (message.role !== "user" && message.role !== "assistant") return [];
+      return [{ role: message.role, content: message.content }];
+    });
+    this.state = { document: current, originalFingerprint: JSON.stringify(document), messages: [{ role: "system", content: "You are the BoSketchObs board agent. Use board tools to answer questions and make precise, bounded edits. Never invent IDs. Coordinates are page coordinates; strokes use the app's vector format. Explain what you changed after completing the task." }, ...priorMessages, firstMessage], uiMessages: [{ role: "user", content: prompt }], settings, sectionId, pageId, steps: 0, controller: new AbortController(), onProgress };
+    if (settings.includePageImage && settings.visionModel) {
+      try {
+        firstMessage.images = [await this.deps.snapshot(page)];
+      } catch (error) {
+        return this.result("failed", "I couldn’t prepare the board image for the vision model.", undefined, error instanceof Error ? error.message : String(error));
+      }
+    }
     this.notify();
     return this.loop();
   }
@@ -118,6 +130,7 @@ export class BoardAgent {
         const message = response.message;
         if (!message) throw new Error("Ollama returned no message.");
         state.messages.push(message);
+        if (message.thinking?.trim()) state.uiMessages.push({ role: "assistant", content: "", thinking: message.thinking });
         this.notify();
         const calls = message.tool_calls ?? [];
         if (!calls.length) return this.result("completed", message.content || "Completed the board task.");
@@ -159,7 +172,7 @@ export class BoardAgent {
 
   private result(status: AgentRunResult["status"], answer: string, pendingAction?: AgentPendingAction, error?: string): AgentRunResult {
     const state = this.state!;
-    return { status, answer, document: clone(state.document), messages: [...state.uiMessages, { role: "assistant", content: answer }], pendingAction, error };
+    return { status, answer, document: clone(state.document), messages: [...state.uiMessages, { role: "assistant", content: answer, error }], pendingAction, error };
   }
 
   private notify() {
@@ -183,7 +196,7 @@ export class BoardAgent {
       const results = state.document.sections.flatMap((item) => item.pages.map((candidate) => ({ section: item.title, page: candidate.title, id: candidate.id, matches: candidate.textBlocks.filter((block) => block.text.toLowerCase().includes(query)).map((block) => block.text.slice(0, 240)) })).filter((candidate) => candidate.page.toLowerCase().includes(query) || candidate.matches.length));
       return toolResult(results.slice(0, 30));
     }
-    if (name === "inspect_page_drawing") return toolResult({ drawing: drawingSummary(page), snapshotBase64: this.deps.snapshot(page) });
+    if (name === "inspect_page_drawing") return toolResult({ drawing: drawingSummary(page), snapshotBase64: await this.deps.snapshot(page) });
     if (name === "add_text") {
       const block = { id: crypto.randomUUID(), x: clamp(Number(args.x ?? 120)), y: clamp(Number(args.y ?? 120)), width: Number(args.width ?? 320), text: String(args.text) };
       state.document = updatePage(state.document, section.id, page.id, (candidate) => ({ ...candidate, textBlocks: [...candidate.textBlocks, block], updatedAt: now() }));

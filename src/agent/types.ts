@@ -1,8 +1,30 @@
 import type { ImageSource, NotePage, SketchDocument } from "../types";
 
+export type AgentProvider = "ollama" | "openclaw";
+
+export type AgentContextRef = {
+  sectionId: string;
+  pageId: string;
+};
+
+export type BoardChatSession = {
+  id: string;
+  title: string;
+  provider: AgentProvider;
+  openclawSessionKey?: string;
+  contextRefs: AgentContextRef[];
+  includeEntireBoard: boolean;
+  messages: AgentMessage[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AgentSettings = {
   enabled: boolean;
+  provider: AgentProvider;
   endpoint: string;
+  openclawEndpoint: string;
+  openclawToken: string;
   model: string;
   visionModel: string;
   maxSteps: number;
@@ -18,6 +40,8 @@ export type AgentMessage = {
   content: string;
   toolName?: string;
   status?: "running" | "applied" | "rejected" | "failed";
+  thinking?: string;
+  error?: string;
 };
 
 export type AgentPendingAction = {
@@ -60,6 +84,7 @@ export type OllamaMessage = {
   images?: string[];
   tool_name?: string;
   tool_calls?: OllamaToolCall[];
+  thinking?: string;
 };
 
 export type OllamaToolCall = { function: { name: string; arguments: Record<string, unknown> | string } };
@@ -73,7 +98,7 @@ export type OllamaResponse = { message?: OllamaMessage };
 
 export type AgentDependencies = {
   transport?: AgentTransport;
-  snapshot?: (page: NotePage) => string;
+  snapshot?: (page: NotePage) => string | Promise<string>;
   searchImages?: (query: string) => Promise<WikimediaImage[]>;
   downloadImage?: (url: string) => Promise<DownloadedAsset>;
 };

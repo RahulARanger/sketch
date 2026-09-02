@@ -1,0 +1,21 @@
+{
+  "name": "dsh-bosketchobs",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "DSH MCP bridge for BoSketchObs diagrams and workspaces",
+  "main": "mcp/server.mjs",
+  "files": ["mcp", "cordis.patch.yml", "README.md"],
+  "dsh": {
+    "mcpServers": {
+      "bosketchobs": {
+        "command": "node",
+        "args": ["./mcp/server.mjs"]
+      }
+    }
+  },
+  "scripts": {
+    "start": "node mcp/server.mjs",
+    "check": "node --check mcp/server.mjs"
+  },
+  "license": "MIT"
+}

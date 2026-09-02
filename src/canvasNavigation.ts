@@ -1,11 +1,18 @@
 import type { CanvasBounds, NotePage, Stroke, TextBlock } from "./types.ts";
 
 export const WORLD_ORIGIN = 50_000;
-export const CONTENT_MARGIN = 96;
+// Keep a generous empty canvas buffer after the content so panning/scrolling
+// can continue as the board grows. This is intentionally in canvas units and
+// scales with zoom along with the surface; the top/left edges stay anchored.
+export const CONTENT_MARGIN = 640;
 
 export function textBlockHeight(block: TextBlock) {
-  const estimatedRows = block.text.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / 34)), 0);
-  return Math.max(92, estimatedRows * 28 + 30);
+  if (typeof block.height === "number" && Number.isFinite(block.height)) return Math.max(92, block.height);
+  // Keep enough room for long URLs, which browsers wrap at punctuation and
+  // therefore occupy more rows than ordinary prose of the same length.
+  const estimatedRows = block.text.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / 24)), 0);
+  const displayMathBlocks = (block.text.match(/(?:\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\])/g) ?? []).length;
+  return Math.max(92, estimatedRows * 28 + 30 + displayMathBlocks * 28);
 }
 
 export function getNavigationBounds(page: NotePage, viewportWidth: number, viewportHeight: number, zoom: number): CanvasBounds {
@@ -52,9 +59,9 @@ export function getNavigationBounds(page: NotePage, viewportWidth: number, viewp
   }
 
   return {
-    minX: minX - CONTENT_MARGIN,
+    minX,
     maxX: maxX + CONTENT_MARGIN,
-    minY: minY - CONTENT_MARGIN,
+    minY,
     maxY: maxY + CONTENT_MARGIN,
   };
 }

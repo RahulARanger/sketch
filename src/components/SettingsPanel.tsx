@@ -1,4 +1,4 @@
-import { AlignJustify, Bot, Check, CircleDot, LoaderCircle, MonitorCog, Moon, RefreshCw, Square, Sun, X } from "lucide-react";
+import { AlignJustify, Bot, Check, CircleDot, LoaderCircle, MonitorCog, Moon, Square, Sun, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import type { AgentSettings } from "../agent/types";
@@ -15,18 +15,16 @@ type SettingsPanelProps = {
   sheetBackground: SheetBackground;
   windowTransparency: number;
   agentSettings: AgentSettings;
-  ollamaModels: string[];
-  ollamaConnection: "idle" | "testing" | "connected" | "error";
-  ollamaError: string;
+  openclawConnection: "idle" | "testing" | "connected" | "error";
+  openclawError: string;
   onThemeChange: (theme: "light" | "dark") => void;
   onAccentChange: (color: string) => void;
   onFontStyleChange: (font: FontStyle) => void;
   onInterfaceSizeChange: (size: InterfaceSize) => void;
   onSheetBackgroundChange: (background: SheetBackground) => void;
   onWindowTransparencyChange: (transparency: number) => void;
-  onAgentSettingsChange: (settings: Partial<AgentSettings>) => void;
-  onTestOllama: () => void;
-  onRefreshOllamaModels: () => void;
+  onAgentSettingsChange: (next: Partial<AgentSettings>) => void;
+  onTestOpenClaw: () => void;
   onClose: () => void;
 };
 
@@ -45,7 +43,7 @@ const FONTS: Array<{ id: FontStyle; label: string; description: string }> = [
   { id: "mono", label: "Mono", description: "Technical work" },
 ];
 
-export function SettingsPanel({ theme, accent, fontStyle, interfaceSize, sheetBackground, windowTransparency, agentSettings, ollamaModels, ollamaConnection, ollamaError, onThemeChange, onAccentChange, onFontStyleChange, onInterfaceSizeChange, onSheetBackgroundChange, onWindowTransparencyChange, onAgentSettingsChange, onTestOllama, onRefreshOllamaModels, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ theme, accent, fontStyle, interfaceSize, sheetBackground, windowTransparency, agentSettings, openclawConnection, openclawError, onThemeChange, onAccentChange, onFontStyleChange, onInterfaceSizeChange, onSheetBackgroundChange, onWindowTransparencyChange, onTestOpenClaw, onClose }: SettingsPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -65,21 +63,6 @@ export function SettingsPanel({ theme, accent, fontStyle, interfaceSize, sheetBa
         </header>
 
         <div className="settings-content">
-          <section className="settings-group ai-settings-group">
-            <div className="setting-label"><strong><Bot /> Board agent</strong><span>Let a local Ollama model read and safely edit this notebook.</span></div>
-            <label className="setting-toggle"><input type="checkbox" checked={agentSettings.enabled} onChange={(event) => onAgentSettingsChange({ enabled: event.target.checked })} /><span>Enable board agent</span></label>
-            <label className="setting-field"><span>Ollama endpoint</span><input value={agentSettings.endpoint} onChange={(event) => onAgentSettingsChange({ endpoint: event.target.value })} placeholder="http://localhost:11434" /></label>
-            <div className="setting-field-row">
-              <label className="setting-field"><span>Agent model</span><select value={agentSettings.model} onChange={(event) => onAgentSettingsChange({ model: event.target.value })}><option value="">Select a model</option>{ollamaModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>
-              <label className="setting-field"><span>Vision model</span><select value={agentSettings.visionModel} onChange={(event) => onAgentSettingsChange({ visionModel: event.target.value })}><option value="">Disabled</option>{ollamaModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>
-            </div>
-            <div className="settings-inline-actions"><button className="settings-action" type="button" onClick={onTestOllama} disabled={ollamaConnection === "testing"}>{ollamaConnection === "testing" ? <LoaderCircle /> : <Check />} {ollamaConnection === "connected" ? "Connected" : ollamaConnection === "error" ? "Retry connection" : "Test connection"}</button><button className="settings-action secondary" type="button" onClick={onRefreshOllamaModels}><RefreshCw /> Refresh models</button></div>
-            {ollamaError ? <div className="integration-alert"><span>{ollamaError}</span></div> : null}
-            <label className="setting-toggle"><input type="checkbox" checked={agentSettings.autoApplySafe} onChange={(event) => onAgentSettingsChange({ autoApplySafe: event.target.checked })} /><span>Auto-apply safe actions</span></label>
-            <label className="setting-toggle"><input type="checkbox" checked={agentSettings.includePageImage} onChange={(event) => onAgentSettingsChange({ includePageImage: event.target.checked })} /><span>Send page drawings to vision model</span></label>
-            <label className="setting-toggle"><input type="checkbox" checked={agentSettings.allowOnlineImages} onChange={(event) => onAgentSettingsChange({ allowOnlineImages: event.target.checked })} /><span>Allow Wikimedia image search</span></label>
-            <label className="setting-field"><span>Maximum agent steps <output>{agentSettings.maxSteps}</output></span><input type="range" min="1" max="12" value={agentSettings.maxSteps} onChange={(event) => onAgentSettingsChange({ maxSteps: Number(event.target.value) })} /></label>
-          </section>
           <section className="settings-group">
             <div className="setting-label"><strong>Appearance</strong><span>Choose how the workspace looks.</span></div>
             <div className="segmented-control" aria-label="Appearance">
