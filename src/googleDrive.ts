@@ -1,74 +1,53 @@
-const GOOGLE_IDENTITY_SCRIPT = "https://accounts.google.com/gsi/client";
 // drive.file permits app-created uploads; metadata.readonly is needed to browse
 // the user's existing folder hierarchy without requesting access to file content.
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata.readonly";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3/files";
 
-type GoogleTokenResponse = { access_token?: string; expires_in?: number; error?: string; error_description?: string };
-type GoogleTokenClient = { requestAccessToken: (options?: { prompt?: string }) => void };
-
-declare global {
-  interface Window {
-    google?: {
-      accounts: { oauth2: { initTokenClient: (options: { client_id: string; scope: string; callback: (response: GoogleTokenResponse) => void; error_callback?: (error: { message?: string }) => void }) => GoogleTokenClient } };
-    };
-  }
-}
+import { invoke } from "@tauri-apps/api/core";
 
 export type DriveFolder = { id: string; name: string; modifiedTime?: string };
 export type DriveFile = { id: string; name: string; mimeType?: string; modifiedTime?: string };
 export type DriveAccount = { email: string; name: string; picture?: string };
+export type DriveNotebook = { id: string; name: string; modifiedTime?: string; kind: "workspace" | "section" };
 
 let accessToken: string | null = null;
 let tokenExpiresAt = 0;
-let scriptPromise: Promise<void> | null = null;
+let refreshToken: string | null = null;
+let account: DriveAccount | null = null;
+const DRIVE_SESSION_KEY = "bosketchobs-google-session-v1";
 
 export function getGoogleClientId() {
   const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
   return env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
 }
+export function getGoogleClientSecret() {
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  return env?.VITE_GOOGLE_CLIENT_SECRET?.trim() ?? "";
+}
 export function isGoogleDriveConfigured() { return Boolean(getGoogleClientId()); }
+export function getGoogleDriveAccount() { return account; }
 export function isGoogleDriveConnected() { return Boolean(accessToken && tokenExpiresAt > Date.now()); }
-export function disconnectGoogleDrive() { accessToken = null; tokenExpiresAt = 0; }
+export function disconnectGoogleDrive() { accessToken = null; refreshToken = null; account = null; tokenExpiresAt = 0; localStorage.removeItem(DRIVE_SESSION_KEY); }
 
-function loadGoogleIdentityServices() {
-  if (window.google) return Promise.resolve();
-  if (scriptPromise) return scriptPromise;
-  scriptPromise = new Promise<void>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = GOOGLE_IDENTITY_SCRIPT;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Google sign-in could not load."));
-    document.head.appendChild(script);
-  });
-  return scriptPromise;
+function restoreSession() {
+  if (account || typeof localStorage === "undefined") return;
+  try {
+    const stored = JSON.parse(localStorage.getItem(DRIVE_SESSION_KEY) ?? "null") as { refreshToken?: string; account?: DriveAccount } | null;
+    if (stored?.refreshToken && stored.account) { refreshToken = stored.refreshToken; account = stored.account; }
+  } catch { /* stale session */ }
 }
 
-async function requestToken(prompt: "consent" | "none" = "none") {
+async function requestToken() {
   if (accessToken && tokenExpiresAt > Date.now() + 30_000) return accessToken;
-  const clientId = getGoogleClientId();
-  if (!clientId) throw new Error("Google Drive is not configured yet. Add VITE_GOOGLE_CLIENT_ID to connect it.");
-  await loadGoogleIdentityServices();
-  if (!window.google) throw new Error("Google sign-in is unavailable in this window.");
-
-  return new Promise<string>((resolve, reject) => {
-    const client = window.google?.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: DRIVE_SCOPE,
-      callback: (response) => {
-        if (!response.access_token) { reject(new Error(response.error_description ?? response.error ?? "Google sign-in was cancelled.")); return; }
-        accessToken = response.access_token;
-        tokenExpiresAt = Date.now() + (response.expires_in ?? 3600) * 1000;
-        resolve(response.access_token);
-      },
-      error_callback: (error) => reject(new Error(error.message ?? "Google sign-in was cancelled.")),
-    });
-    if (!client) { reject(new Error("Google sign-in is unavailable in this window.")); return; }
-    client.requestAccessToken({ prompt });
-  });
+  restoreSession();
+  if (refreshToken) {
+    const result = await invoke<{ access_token: string; expires_in?: number }>("google_drive_refresh", { clientId: getGoogleClientId(), clientSecret: getGoogleClientSecret(), refreshToken });
+    accessToken = result.access_token;
+    tokenExpiresAt = Date.now() + (result.expires_in ?? 3600) * 1000;
+    return accessToken;
+  }
+  throw new Error("Google Drive authorization expired. Connect Google Drive again.");
 }
 
 async function driveFetch<T>(url: string, init?: RequestInit) {
@@ -79,8 +58,22 @@ async function driveFetch<T>(url: string, init?: RequestInit) {
 }
 
 export async function connectGoogleDrive() {
-  await requestToken("consent");
-  return driveFetch<DriveAccount>("https://www.googleapis.com/oauth2/v3/userinfo");
+  const result = await invoke<{ access_token: string; expires_in?: number; account: DriveAccount }>("google_drive_oauth", { clientId: getGoogleClientId(), clientSecret: getGoogleClientSecret(), scope: DRIVE_SCOPE });
+  accessToken = result.access_token;
+  tokenExpiresAt = Date.now() + (result.expires_in ?? 3600) * 1000;
+  account = result.account;
+  // The refresh token is returned by the OAuth exchange and stored locally so
+  // the desktop app can renew the session without showing sign-in again.
+  const refreshed = result as typeof result & { refresh_token?: string };
+  if (refreshed.refresh_token) refreshToken = refreshed.refresh_token;
+  localStorage.setItem(DRIVE_SESSION_KEY, JSON.stringify({ refreshToken, account }));
+  return result.account;
+}
+
+export async function restoreGoogleDriveSession() {
+  restoreSession();
+  if (!refreshToken || !account) return null;
+  try { await requestToken(); return account; } catch { disconnectGoogleDrive(); return null; }
 }
 
 export async function listDriveFolders(parentId = "root") {
@@ -95,6 +88,23 @@ export async function listDriveEntries(parentId = "root") {
   return result.files ?? [];
 }
 
+export async function listDriveNotebooks(): Promise<DriveNotebook[]> {
+  const rootEntries = await listDriveEntries("root");
+  const folders = rootEntries.filter((entry) => entry.mimeType === "application/vnd.google-apps.folder");
+  const notebooks: DriveNotebook[] = [];
+  await Promise.all(folders.map(async (folder) => {
+    const entries = await listDriveEntries(folder.id);
+    const manifest = entries.find((entry) => entry.name === WORKSPACE_MANIFEST_NAME);
+    const section = entries.find((entry) => entry.name === SECTION_MANIFEST_NAME);
+    if (manifest) notebooks.push({ id: folder.id, name: folder.name, modifiedTime: folder.modifiedTime, kind: "workspace" });
+    else if (section) notebooks.push({ id: folder.id, name: folder.name, modifiedTime: folder.modifiedTime, kind: "section" });
+  }));
+  return notebooks.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+const WORKSPACE_MANIFEST_NAME = "bosketchobs-workspace.json";
+const SECTION_MANIFEST_NAME = "bosketchobs-section.json";
+
 export async function downloadDriveText(fileId: string) {
   const token = await requestToken();
   const response = await fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media`, { headers: { Authorization: `Bearer ${token}` } });
@@ -103,7 +113,7 @@ export async function downloadDriveText(fileId: string) {
 }
 
 export async function createDriveFolder(parentId: string, name: string): Promise<DriveFolder> {
-  return driveFetch<DriveFolder>(DRIVE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder", parents: [parentId] }) });
+  return driveFetch<DriveFolder>(`${DRIVE_API}/files`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder", parents: [parentId] }) });
 }
 
 export async function uploadDriveDocument(contents: string, fileName: string, folderId: string, existingFileId?: string) {

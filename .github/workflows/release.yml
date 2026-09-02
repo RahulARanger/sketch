@@ -50,6 +50,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           BOSKETCHOBS_UPDATE_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_CLIENT_SECRET }}
         with:
           tagName: v__VERSION__
           releaseName: BoSketchObs v__VERSION__

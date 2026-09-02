@@ -1,7 +1,12 @@
 use std::fmt::Write as _;
 use std::fs;
+use std::io::{Read, Write};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use rand::RngCore;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use tauri::Manager;
 use tauri_plugin_updater::UpdaterExt;
 
 const UPDATER_PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlGRUYwMTFFRTI0QTcyNjIKUldSaWNrcmlIZ0h2bnoxWTJqd2hmZUliOHhEb2o0OUdQak8zS1NXVUJqVXdBYlB4TG9PNmt2bzAK";
@@ -20,6 +25,75 @@ fn save_note(path: String, contents: String) -> Result<(), String> {
 #[tauri::command]
 fn read_note(path: String) -> Result<String, String> {
     fs::read_to_string(path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn remove_note(path: String) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
+async fn google_drive_oauth(client_id: String, client_secret: String, scope: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|error| format!("Could not start the Google sign-in callback: {error}"))?;
+        let port = listener.local_addr().map_err(|error| error.to_string())?.port();
+        let redirect_uri = format!("http://127.0.0.1:{port}");
+        let mut state_bytes = [0u8; 32];
+        let mut verifier_bytes = [0u8; 48];
+        rand::rng().fill_bytes(&mut state_bytes);
+        rand::rng().fill_bytes(&mut verifier_bytes);
+        let state = URL_SAFE_NO_PAD.encode(state_bytes);
+        let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
+        let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+        let mut auth_url = reqwest::Url::parse("https://accounts.google.com/o/oauth2/v2/auth").map_err(|error| error.to_string())?;
+        auth_url.query_pairs_mut().append_pair("client_id", client_id.trim()).append_pair("redirect_uri", &redirect_uri).append_pair("response_type", "code").append_pair("scope", &format!("openid email profile {scope}")).append_pair("access_type", "offline").append_pair("prompt", "consent").append_pair("state", &state).append_pair("code_challenge", &challenge).append_pair("code_challenge_method", "S256");
+        let url = auth_url.to_string();
+        #[cfg(target_os = "macos")]
+        std::process::Command::new("open").arg(&url).status().map_err(|error| format!("Could not open the system browser: {error}"))?;
+        #[cfg(target_os = "windows")]
+        std::process::Command::new("cmd").args(["/C", "start", "", &url]).status().map_err(|error| format!("Could not open the system browser: {error}"))?;
+        #[cfg(target_os = "linux")]
+        std::process::Command::new("xdg-open").arg(&url).status().map_err(|error| format!("Could not open the system browser: {error}"))?;
+        let (mut stream, _) = listener.accept().map_err(|error| format!("Google sign-in callback failed: {error}"))?;
+        let mut request = [0u8; 8192];
+        let size = stream.read(&mut request).map_err(|error| error.to_string())?;
+        let request_text = String::from_utf8_lossy(&request[..size]);
+        let first_line = request_text.lines().next().unwrap_or("");
+        let callback_path = first_line.strip_prefix("GET ").and_then(|line| line.split_whitespace().next()).ok_or_else(|| "Invalid Google sign-in callback.".to_owned())?;
+        let callback_url = reqwest::Url::parse(&format!("http://127.0.0.1{callback_path}")).map_err(|error| error.to_string())?;
+        let params: std::collections::HashMap<_, _> = callback_url.query_pairs().into_owned().collect();
+        let response_body = "<h2>Sign-in complete</h2><p>You can close this window and return to BoSketchObs.</p>";
+        let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}", response_body.len(), response_body);
+        let _ = stream.write_all(response.as_bytes());
+        if params.get("state") != Some(&state) { return Err("Google sign-in state validation failed.".to_owned()); }
+        if let Some(error) = params.get("error") { return Err(format!("Google sign-in failed: {error}")); }
+        let code = params.get("code").ok_or_else(|| "Google did not return an authorization code.".to_owned())?;
+        let token = reqwest::blocking::Client::new().post("https://oauth2.googleapis.com/token").form(&[("client_id", client_id.trim()), ("client_secret", client_secret.trim()), ("code", code), ("code_verifier", verifier.as_str()), ("grant_type", "authorization_code"), ("redirect_uri", redirect_uri.as_str())]).send().map_err(|error| format!("Could not exchange the Google authorization code: {error}"))?;
+        let status = token.status();
+        let token_body: Value = token.json().map_err(|error| error.to_string())?;
+        if !status.is_success() { return Err(token_body.get("error_description").and_then(Value::as_str).unwrap_or("Google token exchange failed.").to_owned()); }
+        let access_token = token_body.get("access_token").and_then(Value::as_str).ok_or_else(|| "Google did not return an access token.".to_owned())?;
+        let account: Value = reqwest::blocking::Client::new().get("https://www.googleapis.com/oauth2/v3/userinfo").bearer_auth(access_token).send().map_err(|error| error.to_string())?.json().map_err(|error| error.to_string())?;
+        Ok(serde_json::json!({ "access_token": access_token, "refresh_token": token_body.get("refresh_token"), "expires_in": token_body.get("expires_in"), "account": account }))
+    }).await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn google_drive_refresh(client_id: String, client_secret: String, refresh_token: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let token = reqwest::blocking::Client::new().post("https://oauth2.googleapis.com/token")
+            .form(&[("client_id", client_id.trim()), ("client_secret", client_secret.trim()), ("refresh_token", refresh_token.trim()), ("grant_type", "refresh_token")])
+            .send().map_err(|error| format!("Could not refresh the Google session: {error}"))?;
+        let status = token.status();
+        let body: Value = token.json().map_err(|error| error.to_string())?;
+        if !status.is_success() { return Err(body.get("error_description").and_then(Value::as_str).unwrap_or("Google session refresh failed.").to_owned()); }
+        let access_token = body.get("access_token").and_then(Value::as_str).ok_or_else(|| "Google did not return a refreshed access token.".to_owned())?;
+        Ok(serde_json::json!({ "access_token": access_token, "expires_in": body.get("expires_in") }))
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -167,11 +241,15 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().pubkey(UPDATER_PUBLIC_KEY).build())
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                window.show().map_err(|error| error.to_string())?;
+                window.set_focus().map_err(|error| error.to_string())?;
+            }
             #[cfg(target_os = "macos")]
             macos_input::install(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![save_note, read_note, export_page_pdf, ollama_chat, ollama_tags, auto_update, search_wikimedia_images, download_remote_asset])
+        .invoke_handler(tauri::generate_handler![save_note, read_note, remove_note, google_drive_oauth, google_drive_refresh, export_page_pdf, ollama_chat, ollama_tags, auto_update, search_wikimedia_images, download_remote_asset])
         .run(tauri::generate_context!())
         .expect("error while running BoSketchObs");
 }

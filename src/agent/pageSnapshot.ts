@@ -17,7 +17,7 @@ function pathFor(points: Array<{ x: number; y: number }>) {
   return `M ${points.map((point) => `${point.x + WORLD_ORIGIN} ${point.y + WORLD_ORIGIN}`).join(" L ")}`;
 }
 
-export function renderPageSnapshot(page: NotePage) {
+export async function renderPageSnapshot(page: NotePage) {
   const padding = 80;
   const right = Math.max(1100, ...page.textBlocks.map((block) => block.x + block.width), ...page.imageBlocks?.map((block) => block.x + block.width) ?? [], ...page.strokes.flatMap((stroke) => stroke.points.map((point) => point.x + WORLD_ORIGIN))) + padding;
   const bottom = Math.max(760, ...page.textBlocks.map((block) => block.y + textBlockHeight(block)), ...page.imageBlocks?.map((block) => block.y + block.height) ?? [], ...page.strokes.flatMap((stroke) => stroke.points.map((point) => point.y + WORLD_ORIGIN))) + padding;
@@ -25,5 +25,23 @@ export function renderPageSnapshot(page: NotePage) {
   const strokes = page.strokes.map((stroke) => `<path d="${pathFor(stroke.points)}" fill="none" stroke="${stroke.color}" stroke-opacity="${stroke.opacity}" stroke-width="${stroke.width}" stroke-linecap="round" stroke-linejoin="round"/>`).join("");
   const images = (page.imageBlocks ?? []).map((block) => `<rect x="${block.x}" y="${block.y}" width="${block.width}" height="${block.height}" fill="#d8e3ef" stroke="#9aaaba"/><text x="${block.x + 12}" y="${block.y + 28}" fill="#60758c" font-family="system-ui" font-size="16">${escapeXml(block.alt || "Image")}</text>`).join("");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${right}" height="${bottom}" viewBox="0 0 ${right} ${bottom}"><rect width="100%" height="100%" fill="#edf4fb"/><text x="40" y="48" fill="#60758c" font-family="system-ui" font-size="18">${escapeXml(page.title)}</text>${strokes}${images}${text}</svg>`;
-  return toBase64(svg);
+  if (typeof document === "undefined" || typeof Image === "undefined") return toBase64(svg);
+  const image = new Image();
+  const source = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("Could not render the board image for the vision model."));
+    image.src = source;
+  });
+  const maxDimension = 1800;
+  const scale = Math.min(1, maxDimension / right, maxDimension / bottom);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(right * scale));
+  canvas.height = Math.max(1, Math.round(bottom * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not create a canvas for the board image.");
+  context.fillStyle = "#edf4fb";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png").split(",", 2)[1] ?? "";
 }

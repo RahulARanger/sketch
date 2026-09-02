@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Eraser, Hand, Highlighter, ImagePlus, Link2, MousePointer2, PenLine, Redo2, SlidersHorizontal, Table2, Type, Undo2, X } from "lucide-react";
+import { ChevronDown, Eraser, Hand, Highlighter, ImagePlus, LassoSelect, Link2, MousePointer2, PenLine, Redo2, SlidersHorizontal, Table2, Type, Undo2, X } from "lucide-react";
 import { motion } from "motion/react";
 import { PEN_PRESETS } from "../data";
 import type { PenSettings, ToolId } from "../types";
@@ -87,6 +87,7 @@ export function Toolbar({ tool, hardwareEraserActive, presetId, onToolChange, on
     <>
     <motion.div className="tool-dock" role="toolbar" aria-label="Canvas tools" onScroll={() => optionsPresetId && setOptionsPresetId(null)} initial={{ opacity: 0, x: "-50%", y: 14, scale: 0.98 }} animate={{ opacity: 1, x: "-50%", y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 360, damping: 28 }}>
       <motion.button className={`tool-button ${tool === "select" ? "active" : ""}`} onClick={() => onToolChange("select")} title="Select (V)" aria-label="Select" animate={{ scale: tool === "select" ? 1.04 : 1 }} whileHover={{ y: -2 }} whileTap={{ scale: 0.9 }}><MousePointer2 /></motion.button>
+      <motion.button className={`tool-button ${tool === "lasso" ? "active" : ""}`} onClick={() => onToolChange("lasso")} title="Lasso select handwriting" aria-label="Lasso select" animate={{ scale: tool === "lasso" ? 1.04 : 1 }} whileHover={{ y: -2 }} whileTap={{ scale: 0.9 }}><LassoSelect /></motion.button>
       <motion.button className={`tool-button ${tool === "text" ? "active" : ""}`} onClick={() => onToolChange("text")} title="Text mode — click anywhere to type (T)" aria-label="Text mode — click anywhere to type" animate={{ scale: tool === "text" ? 1.04 : 1 }} whileHover={{ y: -2 }} whileTap={{ scale: 0.9 }}><Type /></motion.button>
       <span className="tool-separator" />
       {PEN_PRESETS.map((preset) => {

@@ -8,6 +8,18 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (() => {
+        const showStartupError = (message) => {
+          const root = document.getElementById("root");
+          if (!root || root.dataset.startupError) return;
+          root.dataset.startupError = "true";
+          root.innerHTML = `<main style="min-height:100vh;padding:32px;color:#f1f4f6;background:#151a1f;font-family:-apple-system,BlinkMacSystemFont,sans-serif"><h1>BoSketchObs could not open</h1><p>The app encountered an error while starting. Reload the window to try again.</p><pre style="white-space:pre-wrap;color:#ff9b9b">${String(message)}</pre><button onclick="location.reload()" style="padding:10px 14px;border-radius:8px;cursor:pointer">Reload</button></main>`;
+        };
+        window.addEventListener("error", (event) => showStartupError(event.error?.stack || event.message));
+        window.addEventListener("unhandledrejection", (event) => showStartupError(event.reason?.stack || event.reason));
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

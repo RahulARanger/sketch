@@ -11,8 +11,8 @@ export const PEN_PRESETS: PenPreset[] = [
 
 const now = new Date().toISOString();
 
-export function createBlankPage(title = "Untitled page"): NotePage {
-  return { id: crypto.randomUUID(), title, strokes: [], textBlocks: [], imageBlocks: [], tableBlocks: [], linkBlocks: [], updatedAt: new Date().toISOString() };
+export function createBlankPage(title = "Untitled page", parentId?: string): NotePage {
+  return { id: crypto.randomUUID(), title, ...(parentId ? { parentId } : {}), strokes: [], textBlocks: [], imageBlocks: [], tableBlocks: [], linkBlocks: [], updatedAt: new Date().toISOString() };
 }
 
 export function createSection(title = "Untitled section", color = "#5a8ff0"): NoteSection {
@@ -50,10 +50,20 @@ export const STARTER_DOCUMENT: SketchDocument = {
   ],
 };
 
-function normalizeDocument(document: SketchDocument): SketchDocument {
+export function normalizeDocument(document: SketchDocument): SketchDocument {
   const sections = document.sections.length ? document.sections : [createSection()];
   for (const section of sections) {
     if (!section.pages.length) section.pages = [createBlankPage()];
+    const pageById = new Map(section.pages.map((page) => [page.id, page]));
+    section.pages = section.pages.map((page) => {
+      if (!page.parentId) return page;
+      const parent = pageById.get(page.parentId);
+      if (!parent || parent.id === page.id || parent.parentId) {
+        const { parentId: _parentId, ...topLevelPage } = page;
+        return topLevelPage;
+      }
+      return page;
+    });
     if (!section.pages.some((page) => page.id === section.activePageId)) section.activePageId = section.pages[0].id;
     for (const page of section.pages) {
       page.imageBlocks = Array.isArray(page.imageBlocks) ? page.imageBlocks : [];
