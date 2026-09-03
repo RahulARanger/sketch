@@ -1,7 +1,7 @@
-import { AlignJustify, Bot, Check, CircleDot, LoaderCircle, MonitorCog, Moon, Square, Sun, X } from "lucide-react";
+import { AlignJustify, Check, CircleDot, Cloud, LoaderCircle, MonitorCog, Moon, Square, Sun, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import type { AgentSettings } from "../agent/types";
+import type { GoogleOAuthConfig } from "../googleDrive";
 
 export type FontStyle = "system" | "rounded" | "serif" | "mono";
 export type InterfaceSize = "comfortable" | "compact";
@@ -14,17 +14,18 @@ type SettingsPanelProps = {
   interfaceSize: InterfaceSize;
   sheetBackground: SheetBackground;
   windowTransparency: number;
-  agentSettings: AgentSettings;
-  openclawConnection: "idle" | "testing" | "connected" | "error";
-  openclawError: string;
   onThemeChange: (theme: "light" | "dark") => void;
   onAccentChange: (color: string) => void;
   onFontStyleChange: (font: FontStyle) => void;
   onInterfaceSizeChange: (size: InterfaceSize) => void;
   onSheetBackgroundChange: (background: SheetBackground) => void;
   onWindowTransparencyChange: (transparency: number) => void;
-  onAgentSettingsChange: (next: Partial<AgentSettings>) => void;
-  onTestOpenClaw: () => void;
+  googleOAuthConfig: GoogleOAuthConfig;
+  googleConnection: "idle" | "testing" | "connected" | "error";
+  googleError: string;
+  onGoogleOAuthConfigChange: (next: GoogleOAuthConfig) => void;
+  onTestGoogle: () => void;
+  onConnectGoogle: () => void;
   onClose: () => void;
 };
 
@@ -43,7 +44,7 @@ const FONTS: Array<{ id: FontStyle; label: string; description: string }> = [
   { id: "mono", label: "Mono", description: "Technical work" },
 ];
 
-export function SettingsPanel({ theme, accent, fontStyle, interfaceSize, sheetBackground, windowTransparency, agentSettings, openclawConnection, openclawError, onThemeChange, onAccentChange, onFontStyleChange, onInterfaceSizeChange, onSheetBackgroundChange, onWindowTransparencyChange, onTestOpenClaw, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ theme, accent, fontStyle, interfaceSize, sheetBackground, windowTransparency, googleOAuthConfig, googleConnection, googleError, onGoogleOAuthConfigChange, onTestGoogle, onConnectGoogle, onThemeChange, onAccentChange, onFontStyleChange, onInterfaceSizeChange, onSheetBackgroundChange, onWindowTransparencyChange, onClose }: SettingsPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -63,6 +64,19 @@ export function SettingsPanel({ theme, accent, fontStyle, interfaceSize, sheetBa
         </header>
 
         <div className="settings-content">
+          <section className="settings-group">
+            <div className="setting-label"><strong>Google Drive</strong><span>Use your own OAuth app credentials. They’re saved only for this user on this device.</span></div>
+            <div className="google-settings-fields">
+              <label><span>Client ID</span><input value={googleOAuthConfig.clientId} onChange={(event) => onGoogleOAuthConfigChange({ ...googleOAuthConfig, clientId: event.target.value })} placeholder="...apps.googleusercontent.com" autoComplete="off" /></label>
+              <label><span>Client secret</span><input type="password" value={googleOAuthConfig.clientSecret} onChange={(event) => onGoogleOAuthConfigChange({ ...googleOAuthConfig, clientSecret: event.target.value })} placeholder="Your client secret" autoComplete="off" /></label>
+            </div>
+            <div className="settings-inline-actions">
+              <button className="settings-action secondary" type="button" onClick={onTestGoogle} disabled={googleConnection === "testing"}><LoaderCircle /> {googleConnection === "testing" ? "Testing…" : "Test connection"}</button>
+              <button className="settings-action" type="button" onClick={onConnectGoogle} disabled={googleConnection !== "connected"}><Cloud /> Connect Google</button>
+            </div>
+            {googleConnection === "connected" ? <small className="settings-status success">Google OAuth service is reachable.</small> : googleError ? <small className="settings-status error">{googleError}</small> : <small className="settings-status">Test your credentials before connecting.</small>}
+          </section>
+
           <section className="settings-group">
             <div className="setting-label"><strong>Appearance</strong><span>Choose how the workspace looks.</span></div>
             <div className="segmented-control" aria-label="Appearance">

@@ -18,7 +18,7 @@ import { Toolbar } from "./components/Toolbar";
 import { createBlankPage, createSection, migrateDocument, PEN_PRESETS, STARTER_DOCUMENT } from "./data";
 import { readBrowserDraft, removeBrowserDraft, writeBrowserDraft } from "./draftStorage";
 import { getToolShortcut, isEditingText, shouldSkipShortcut } from "./keyboardShortcuts";
-import { disconnectGoogleDrive, downloadDriveText, getGoogleDriveAccount, isGoogleDriveConfigured, listDriveEntries, listDriveNotebooks, restoreGoogleDriveSession, type DriveAccount, type DriveNotebook, uploadDriveDocument } from "./googleDrive";
+import { connectGoogleDrive, disconnectGoogleDrive, downloadDriveText, getGoogleDriveAccount, getGoogleOAuthConfig, isGoogleDriveConfigured, listDriveEntries, listDriveNotebooks, loadGoogleOAuthConfig, saveGoogleOAuthConfig, testGoogleDriveConnection, type DriveAccount, type DriveNotebook, type GoogleOAuthConfig, restoreGoogleDriveSession, uploadDriveDocument } from "./googleDrive";
 import type { LegacyNotebookDocument, NotePage, NoteSection, PenSettings, SketchDocument, ToolId } from "./types";
 import { APP_CONFIG_FILE, DRAFT_FILE, findSectionLocationConflict, loadLocalSectionsFromConfig, loadSection, loadWorkspaceWithManifest, makeAppWorkspaceConfig, makeDraftSnapshot, makeSectionManifest, parseAppWorkspaceConfig, saveSection, SECTION_MANIFEST, WORKSPACE_MANIFEST, type DraftSnapshot, type SectionManifest, type SectionSaveLocation, type WorkspaceManifest } from "./workspaceStorage";
 import { serializeBoardContext } from "./agent/boardContext";
@@ -185,6 +185,9 @@ export default function App() {
   const [googleNotebooks, setGoogleNotebooks] = useState<DriveNotebook[]>([]);
   const [googleProfileOpen, setGoogleProfileOpen] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleOAuthConfig, setGoogleOAuthConfig] = useState<GoogleOAuthConfig>(getGoogleOAuthConfig);
+  const [googleConnection, setGoogleConnection] = useState<"idle" | "testing" | "connected" | "error">("idle");
+  const [googleError, setGoogleError] = useState("");
   const [agentSettings, setAgentSettings] = useState<AgentSettings>(loadAgentSettings);
   const [openclawConnection, setOpenclawConnection] = useState<"idle" | "testing" | "connected" | "error">("idle");
   const [openclawError, setOpenclawError] = useState("");
@@ -237,11 +240,34 @@ export default function App() {
   }, [googleAccount]);
 
   useEffect(() => {
+    void loadGoogleOAuthConfig().then(setGoogleOAuthConfig);
+  }, []);
+
+  useEffect(() => {
     if (!isGoogleDriveConfigured()) return;
     void restoreGoogleDriveSession().then((restored) => {
       if (restored) { setGoogleAccount(restored); }
     });
+  }, [googleOAuthConfig]);
+
+  const updateGoogleOAuthConfig = useCallback((next: GoogleOAuthConfig) => {
+    setGoogleOAuthConfig(next);
+    setGoogleConnection("idle");
+    setGoogleError("");
+    void saveGoogleOAuthConfig(next).catch((error) => setGoogleError(error instanceof Error ? error.message : "Could not save Google settings."));
   }, []);
+
+  const testGoogle = useCallback(async () => {
+    setGoogleConnection("testing"); setGoogleError("");
+    try { await saveGoogleOAuthConfig(googleOAuthConfig); await testGoogleDriveConnection(googleOAuthConfig); setGoogleConnection("connected"); }
+    catch (error) { setGoogleConnection("error"); setGoogleError(error instanceof Error ? error.message : String(error)); }
+  }, [googleOAuthConfig]);
+
+  const connectGoogle = useCallback(async () => {
+    setGoogleConnection("testing"); setGoogleError("");
+    try { await saveGoogleOAuthConfig(googleOAuthConfig); const account = await connectGoogleDrive(); setGoogleAccount(account); setGoogleConnection("connected"); setNotice({ tone: "success", message: `Connected Google Drive as ${account.email}.` }); }
+    catch (error) { setGoogleConnection("error"); setGoogleError(error instanceof Error ? error.message : String(error)); }
+  }, [googleOAuthConfig]);
 
   useEffect(() => { void refreshGoogleNotebooks(); }, [refreshGoogleNotebooks]);
 
@@ -1132,7 +1158,7 @@ export default function App() {
         {linkDialogOpen ? <LinkDialog key="link-dialog" onCancel={() => setLinkDialogOpen(false)} onSave={saveLink} /> : null}
         {deleteTarget ? <ConfirmDialog key="delete-dialog" title={`Delete “${deleteTarget.title}”?`} description={deleteDescription} confirmLabel={deleteTarget.kind === "section" ? "Delete section" : "Delete page"} onCancel={() => setDeleteTarget(null)} onConfirm={confirmDelete} /> : null}
         {saveLocationOpen ? <SaveLocationDialog key="save-location-dialog" sectionTitle={activeSection.title} currentLocation={activeSectionLocation ?? null} onChoose={(location) => void chooseSaveLocation(location)} onOpenDrive={openDriveWorkspace} onDriveConnected={setGoogleAccount} onClose={() => setSaveLocationOpen(false)} onPickLocal={pickLocalLocation} /> : null}
-        {settingsOpen ? <SettingsPanel key="settings-panel" theme={theme} accent={accent} fontStyle={fontStyle} interfaceSize={interfaceSize} sheetBackground={sheetBackground} windowTransparency={windowTransparency} agentSettings={agentSettings} openclawConnection={openclawConnection} openclawError={openclawError} onThemeChange={setTheme} onAccentChange={setAccent} onFontStyleChange={setFontStyle} onInterfaceSizeChange={setInterfaceSize} onSheetBackgroundChange={setSheetBackground} onWindowTransparencyChange={setWindowTransparency} onAgentSettingsChange={updateAgentSettings} onTestOpenClaw={() => void checkOpenClaw()} onClose={() => setSettingsOpen(false)} /> : null}
+        {settingsOpen ? <SettingsPanel key="settings-panel" theme={theme} accent={accent} fontStyle={fontStyle} interfaceSize={interfaceSize} sheetBackground={sheetBackground} windowTransparency={windowTransparency} googleOAuthConfig={googleOAuthConfig} googleConnection={googleConnection} googleError={googleError} onGoogleOAuthConfigChange={updateGoogleOAuthConfig} onTestGoogle={() => void testGoogle()} onConnectGoogle={() => void connectGoogle()} onThemeChange={setTheme} onAccentChange={setAccent} onFontStyleChange={setFontStyle} onInterfaceSizeChange={setInterfaceSize} onSheetBackgroundChange={setSheetBackground} onWindowTransparencyChange={setWindowTransparency} onClose={() => setSettingsOpen(false)} /> : null}
       </AnimatePresence>
       <AnimatePresence>{assistantOpen && activeChatSession ? <AssistantPanel key="assistant-panel" status={agentStatus} messages={agentMessages} pendingAction={undefined} connection={openclawConnection} model="Gateway session" sections={sketchDoc.sections} sessions={chatSessions} activeSession={activeChatSession} onSessionSelect={selectChatSession} onNewSession={createNewChatSession} onSubmit={(prompt) => void runAgent(prompt)} onCancel={() => void openclawRef.current.abort(agentSettings.openclawEndpoint, agentSettings.openclawToken, activeChatSession.openclawSessionKey ?? "")} onApprove={() => undefined} onReject={() => undefined} onClose={() => setAssistantOpen(false)} /> : null}</AnimatePresence>
       <AnimatePresence>{notice ? <motion.div className={`app-notice ${notice.tone}`} role="status" initial={{ opacity: 0, y: 12, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8 }} onAnimationComplete={() => window.setTimeout(() => setNotice(null), 4200)}>{notice.tone === "success" ? <CheckCircle2 /> : <AlertCircle />}<span>{notice.message}</span><button type="button" onClick={() => setNotice(null)} aria-label="Dismiss message"><X /></button></motion.div> : null}</AnimatePresence>

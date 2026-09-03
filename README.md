@@ -71,22 +71,17 @@ For Google Drive, choose **Save as → Google Drive** while the section you want
 1. In your Google Cloud project, enable **Google Drive API** under **APIs & Services → Library**.
 2. Go to **APIs & Services → Credentials → Create credentials → OAuth client ID**. Choose **Desktop app**.
 3. No authorized domains or redirect URIs need to be entered. BoSketchObs opens Google in the system browser and uses a temporary loopback callback on `127.0.0.1`.
-4. Copy the client ID (it ends in `.apps.googleusercontent.com`) into a local `.env` file:
+4. In BoSketchObs, open **Settings → Google Drive** and enter the client ID and client secret. The values are stored in the per-user app-data config so they only need to be entered once.
 
-```bash
-VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-VITE_GOOGLE_CLIENT_SECRET=your-client-secret
-```
+If Google reports that the client secret is missing, copy it from the downloaded Desktop OAuth client JSON. A desktop-app client secret cannot be kept private, so never reuse a server application's secret here.
 
-If Google reports that the client secret is missing, copy it from the downloaded Desktop OAuth client JSON into `VITE_GOOGLE_CLIENT_SECRET`. A desktop-app client secret cannot be kept private, so never reuse a server application's secret here.
-
-5. Restart `npm run tauri dev`, then select **Location → Google Drive → Continue with Google**.
+5. Select **Test connection**, then **Connect Google**. After connecting, select **Save as → Google Drive**.
 
 The app requests `drive.file` for files it creates and `drive.metadata.readonly` only to show folder names. The access token is kept in memory and is not written into your notebook or repository.
 
 ## Release pipeline
 
-See [RELEASING.md](RELEASING.md) for the `dev` quality workflow, `main` release workflow, signing-key setup, and automatic updater configuration.
+See [RELEASING.md](RELEASING.md) for the local verification and release process, signing-key setup, and automatic updater configuration.
 
 ## DSH / MCP integration
 

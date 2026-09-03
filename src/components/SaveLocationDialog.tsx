@@ -48,7 +48,7 @@ export function SaveLocationDialog({ sectionTitle = "this section", currentLocat
 
   const openDrive = async () => {
     setMode("drive");
-    if (!isGoogleDriveConfigured()) { setError("Google Drive is ready to connect. Add VITE_GOOGLE_CLIENT_ID to your environment first."); return; }
+    if (!isGoogleDriveConfigured()) { setError("Google Drive is ready to connect. Add your Google OAuth credentials in Settings first."); return; }
     setLoading(true); setError("");
     try {
       const restoredAccount = await restoreGoogleDriveSession();

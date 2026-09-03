@@ -5,6 +5,7 @@ const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3/files";
 
 import { invoke } from "@tauri-apps/api/core";
+import { appDataDir, join as joinPath } from "@tauri-apps/api/path";
 
 export type DriveFolder = { id: string; name: string; modifiedTime?: string };
 export type DriveFile = { id: string; name: string; mimeType?: string; modifiedTime?: string };
@@ -16,16 +17,49 @@ let tokenExpiresAt = 0;
 let refreshToken: string | null = null;
 let account: DriveAccount | null = null;
 const DRIVE_SESSION_KEY = "bosketchobs-google-session-v1";
+const GOOGLE_CONFIG_KEY = "bosketchobs-google-config-v1";
+export const GOOGLE_CONFIG_FILE = "bosketchobs-google-config.json";
+export type GoogleOAuthConfig = { clientId: string; clientSecret: string };
+let googleConfig: GoogleOAuthConfig = { clientId: "", clientSecret: "" };
+
+function readStoredGoogleConfig(): GoogleOAuthConfig {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(GOOGLE_CONFIG_KEY) ?? "null") as Partial<GoogleOAuthConfig> | null;
+    return { clientId: parsed?.clientId?.trim() ?? "", clientSecret: parsed?.clientSecret?.trim() ?? "" };
+  } catch { return { clientId: "", clientSecret: "" }; }
+}
+export function getGoogleOAuthConfig() { return googleConfig; }
+export async function loadGoogleOAuthConfig(): Promise<GoogleOAuthConfig> {
+  let stored = readStoredGoogleConfig();
+  if ("__TAURI_INTERNALS__" in window) {
+    try {
+      const contents = await invoke<string>("read_note", { path: await appDataDir().then((directory) => joinPath(directory, GOOGLE_CONFIG_FILE)) });
+      const parsed = JSON.parse(contents) as Partial<GoogleOAuthConfig>;
+      stored = { clientId: parsed.clientId?.trim() ?? "", clientSecret: parsed.clientSecret?.trim() ?? "" };
+    } catch { /* first launch or older install */ }
+  }
+  googleConfig = stored;
+  return stored;
+}
+export async function saveGoogleOAuthConfig(next: GoogleOAuthConfig) {
+  googleConfig = { clientId: next.clientId.trim(), clientSecret: next.clientSecret.trim() };
+  localStorage.setItem(GOOGLE_CONFIG_KEY, JSON.stringify(googleConfig));
+  if ("__TAURI_INTERNALS__" in window) await invoke("save_note", { path: await appDataDir().then((directory) => joinPath(directory, GOOGLE_CONFIG_FILE)), contents: JSON.stringify(googleConfig, null, 2) });
+  return googleConfig;
+}
 
 export function getGoogleClientId() {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-  return env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
+  return googleConfig.clientId || ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_ID?.trim() ?? "");
 }
 export function getGoogleClientSecret() {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-  return env?.VITE_GOOGLE_CLIENT_SECRET?.trim() ?? "";
+  return googleConfig.clientSecret || ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_GOOGLE_CLIENT_SECRET?.trim() ?? "");
 }
-export function isGoogleDriveConfigured() { return Boolean(getGoogleClientId()); }
+export function isGoogleDriveConfigured() { return Boolean(getGoogleClientId() && getGoogleClientSecret()); }
+export async function testGoogleDriveConnection(config: GoogleOAuthConfig) {
+  if (!config.clientId.trim() || !config.clientSecret.trim()) throw new Error("Enter both Google Client ID and Client Secret first.");
+  const response = await fetch("https://accounts.google.com/.well-known/openid-configuration");
+  if (!response.ok) throw new Error("Could not reach Google’s OAuth service.");
+}
 export function getGoogleDriveAccount() { return account; }
 export function isGoogleDriveConnected() { return Boolean(accessToken && tokenExpiresAt > Date.now()); }
 export function disconnectGoogleDrive() { accessToken = null; refreshToken = null; account = null; tokenExpiresAt = 0; localStorage.removeItem(DRIVE_SESSION_KEY); }
