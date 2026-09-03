@@ -1,0 +1,94 @@
+name: Release desktop apps
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  publish:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-13
+            target: x86_64-apple-darwin
+          - platform: macos-14
+            target: aarch64-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: npm ci
+      - name: Normalize updater signing key
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_RAW: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_PRIVATE_KEY }}
+        run: |
+          python - <<'PY'
+          import base64
+          import os
+          import sys
+
+          raw = (os.getenv("TAURI_SIGNING_PRIVATE_KEY_RAW") or "").strip()
+          if not raw:
+              sys.exit("Missing updater signing key secret. Set TAURI_SIGNING_PRIVATE_KEY (or TAURI_PRIVATE_KEY).")
+
+          def is_minisign_secret(value: str) -> bool:
+              return value.startswith("untrusted comment:")
+
+          normalized = raw
+          if not is_minisign_secret(normalized):
+              try:
+                  decoded = base64.b64decode(raw).decode("utf-8").strip()
+              except Exception:
+                  decoded = ""
+              if is_minisign_secret(decoded):
+                  normalized = decoded
+
+          if not is_minisign_secret(normalized):
+              sys.exit("Updater signing key is invalid. Provide the full minisign secret key text (including the untrusted comment line) or its base64 encoding.")
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write("TAURI_SIGNING_PRIVATE_KEY<<EOF\n")
+              env_file.write(normalized.rstrip("\n") + "\n")
+              env_file.write("EOF\n")
+          PY
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || secrets.TAURI_PRIVATE_KEY_PASSWORD }}
+          BOSKETCHOBS_UPDATE_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_CLIENT_SECRET }}
+        with:
+          tagName: v__VERSION__
+          releaseName: BoSketchObs v__VERSION__
+          releaseBody: Download the signed BoSketchObs installer for your platform. Existing installations will discover this release automatically.
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}
